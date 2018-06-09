@@ -31,7 +31,19 @@ class Node(object):
         self.debug = debug
         self.connected = False
 
-        self.store = {}
+        # Persistent state
+        self.current_term = 0 # highest log entry known to be commited
+        self.voted_for = None # candidate_id that received vote in current term
+        self.log = []         # log entries for state machine
+        self.store = {}       # store that is updated as log entries are commited
+
+        # Volatile state
+        self.commit_index = 0 # index of the highest log entry known to be commited
+        self.last_applied = 0 # index of the highest log entry applied
+
+        # Volatile state; only used when acting as a leader
+        self.next_index = []  # index of the next log entry to send each server
+        self.match_index = [] # index of the highest log entry that's known as replicated
 
     def log(self, msg):
         "Print log messages"
@@ -87,26 +99,30 @@ class Node(object):
                 "Received unexpected helloMessage after first connection, ignoring."
             )
 
+    def append_entries_handler(self, msg):
+        "Handle append entry requests"
+
+        pass
+
+    def request_vote_handler(self, msg):
+        "Handle request vote requests"
+        pass
+
     def _setup_sockets(self, pub, router):
         "Set up ZMQ sockets"
 
-        # SUB socket for getting messages from broker
         self.sub_sock = self.context.socket(zmq.SUB)
         self.sub_sock.connect(pub)
 
-        # get messages for this node
         self.sub_sock.setsockopt_string(zmq.SUBSCRIBE, self.name)
 
-        # make a handler for recv'd msgs
         self.sub = zmqstream.ZMQStream(self.sub_sock, self.loop)
         self.sub.on_recv(self.handler)
 
-        # REQ socket for sending messages to the broker
         self.req_sock = self.context.socket(zmq.REQ)
         self.req_sock.connect(router)
         self.req_sock.setsockopt_string(zmq.IDENTITY, self.name)
 
-        # REQ handler, for error handling
         self.req = zmqstream.ZMQStream(self.req_sock, self.loop)
         self.req.on_recv(self.handle_broker_message)
 
@@ -119,6 +135,7 @@ class Node(object):
     def _setup_message_handlers(self):
         self.handlers = {
             "hello": self.hello_response_handler,
+            "appendEntries": self.append_entries_handler,
         }
 
     def shutdown(self, _, __):
