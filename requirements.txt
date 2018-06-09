@@ -2,7 +2,7 @@ certifi==2018.4.16
 chardet==3.0.4
 -e git+https://github.com/uchicago-cs/chistributed.git@c598adc328a5a2c9b52b96e63cf3e433dafd644c#egg=chistributed
 click==6.7
-cmd2==0.8.5
+cmd2==0.8.7
 colorama==0.3.9
 idna==2.6
 pyparsing==2.2.0

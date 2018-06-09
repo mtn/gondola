@@ -1,4 +1,5 @@
 import argparse
+from node import Node
 
 
 def parse_args():
@@ -9,7 +10,7 @@ def parse_args():
     parser.add_argument("--peer", action="append")
     parser.add_argument("--debug", action="store_true")
 
-    parser.parse_args()
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
@@ -19,7 +20,7 @@ if __name__ == "__main__":
         in_args.node_name,
         in_args.pub_endpoint,
         in_args.router_endpoint,
-        in_args.peers,
+        in_args.peer,
         in_args.debug,
     )
     n.run()
