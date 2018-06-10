@@ -108,7 +108,7 @@ class Node(object):
         msg_frames = [i.decode() for i in msg_frames]
 
         assert len(msg_frames) == 3, (
-            "Multipart ZMQ message had wrong length. " "Full message contents:\n{}"
+            "Multipart ZMQ message had wrong length. Full message contents:\n{}"
         ).format(msg_frames)
 
         assert msg_frames[0] == self.name
@@ -138,7 +138,7 @@ class Node(object):
         "Handle append entry requests"
         pass
 
-    def append_entries_response_handler(self, msg):
+    def append_response_handler(self, msg):
         "Handle append entry responses (as the leader)"
         pass
 
@@ -151,7 +151,7 @@ class Node(object):
         pass
 
     def become_follower(self):
-        "Transition to follower role and start a timeout"
+        "Transition to follower role and start an election timer"
 
         self.role = Role.Follower
         self.set_timeout()
@@ -159,16 +159,18 @@ class Node(object):
     def start_election(self):
         "Start an election by requesting a vote from each node"
 
-        # req = RequestVote()
+        self.log("Starting election")
 
-        # self.term = 0         # latest term the server has seen
-        # self.voted_for = None # candidate_id that received vote in current term
-        # self.ledger = []      # ledger entries for state machine
-        # self.store = {}       # store that is updated as ledger entries are commited
+        if self.ledger:
+            last_log_term = self.ledger[-1].term
+        else:
+            last_log_term = 0
 
-        # # Volatile state
-        # self.commit_index = 0 # index of the highest ledger entry known to be commited
-        # self.last_applied = 0 # index of the highest ledger entry applied
+        self.send_to_broker(
+            RequestVote(
+                self.name, self.peers, self.term, len(self.ledger), last_log_term
+            )
+        )
 
     def set_timeout(self):
         "Add an election timeout"
@@ -215,8 +217,10 @@ class Node(object):
     def _setup_message_handlers(self):
         self.handlers = {
             "hello": self.hello_response_handler,
+            "requestVote": self.request_vote_handler,
+            "voteResponse": self.vote_response_handler,
             "appendEntries": self.append_entries_handler,
-            # TODO
+            "appendResponse": self.append_response_handler,
         }
 
     def shutdown(self, _, __):

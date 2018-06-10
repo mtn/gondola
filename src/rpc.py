@@ -12,10 +12,13 @@ class RPC(object):
         src :: String
             The node name of the source
         dests :: [String]
-            The node names of the destinations (one destination is a singleton list)
+            The node names of the destinations
         """
         self.src = src
         self.dests = dests
+
+    def serialize(self):
+        "Serialize into a list of messages that the broker can transmit"
 
 
 class RequestVote(RPC):
@@ -29,19 +32,22 @@ class RequestVote(RPC):
         self.last_term = last_log_term
 
     def serialize(self):
-        "Serialize into a list of messages that the broker can transmit"
         msgs = []
 
         for dest in self.dests:
-            msgs.append({
-                "source": self.src,
-                "destination": dest,
-                "term": self.term,
-                "lastLogIndex": self.last_index,
-                "lastTerm": self.last_term,
-            })
+            msgs.append(
+                {
+                    "type": "requestVote",
+                    "source": self.src,
+                    "destination": dest,
+                    "term": self.term,
+                    "lastLogIndex": self.last_index,
+                    "lastTerm": self.last_term,
+                }
+            )
 
         return msgs
+
 
 class VoteResponse(RPC):
     "Response to request for vote"
@@ -49,8 +55,21 @@ class VoteResponse(RPC):
     def __init__(self, src, dests, term, vote_granted):
         RPC.__init__(self, src, dests)
 
+        # The node's current term, so the candidate can update itself
         self.term = term
         self.vote_granted = vote_granted
+
+    def serialize(self):
+        assert len(self.dests) == 1
+
+        return [
+            {
+                "source": self.src,
+                "destination": self.dests[0],
+                "term": self.term,
+                "voteGranted": self.vote_granted,
+            }
+        ]
 
 
 class AppendEntries(RPC):
@@ -58,6 +77,7 @@ class AppendEntries(RPC):
 
     def __init__(self, src, dests):
         RPC.__init__(self, src, dests)
+        # TODO
 
 
 class AppendResponse(RPC):
@@ -65,3 +85,4 @@ class AppendResponse(RPC):
 
     def __init__(self, src, dests):
         RPC.__init__(self, src, dests)
+        # TODO
