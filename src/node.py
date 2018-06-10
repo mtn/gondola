@@ -1,11 +1,34 @@
+"A Raft Node"
+
 import sys, zmq, signal, json, tornado
 
+from time import time
+from random import randint
+from enum import Enum, auto
 from zmq.eventloop import ioloop, zmqstream
+
+from rpc import RPC, RequestVote
+
+# pylint: disable=too-many-instance-attributes
 
 ioloop.install()
 
-class Node(object):
+# TODO conf
+TIMEOUT_INF = 150
+TIMEOUT_SUP = 300
 
+
+class Role(Enum):
+    "Possible node states"
+    Follower = auto()
+    Candidate = auto()
+    Leader = auto()
+
+
+class Node(object):
+    "Raft node"
+
+    # pylint: disable=too-many-arguments
     def __init__(self, name, pub, router, peers, debug):
         """
         name :: String
@@ -27,23 +50,26 @@ class Node(object):
         self._setup_sockets(pub, router)
         self._setup_signal_handling()
         self._setup_message_handlers()
+        self._timeout = None
 
         self.debug = debug
         self.connected = False
+        self.peers = peers
+        self.role = None
 
         # Persistent state
-        self.current_term = 0 # highest log entry known to be commited
-        self.voted_for = None # candidate_id that received vote in current term
-        self.log = []         # log entries for state machine
-        self.store = {}       # store that is updated as log entries are commited
+        self.term = 0  # latest term the server has seen
+        self.voted_for = None  # candidate_id that received vote in current term
+        self.ledger = []  # ledger entries for state machine
+        self.store = {}  # store that is updated as ledger entries are commited
 
         # Volatile state
-        self.commit_index = 0 # index of the highest log entry known to be commited
-        self.last_applied = 0 # index of the highest log entry applied
+        self.commit_index = 0  # index of the highest ledger entry known to be commited
+        self.last_applied = 0  # index of the highest ledger entry applied
 
         # Volatile state; only used when acting as a leader
-        self.next_index = []  # index of the next log entry to send each server
-        self.match_index = [] # index of the highest log entry that's known as replicated
+        self.next_index = []  # index of the next ledger entry to send each server
+        self.match_index = []  # index of the highest ledger entry known to be replicated
 
     def log(self, msg):
         "Print log messages"
@@ -64,7 +90,16 @@ class Node(object):
 
     def send_to_broker(self, msg):
         "Send a message to the broker"
-        self.req.send_json(msg)
+
+        msgs = []
+
+        if isinstance(msg, RPC):
+            msgs = msg.serialize()
+        else:
+            msgs = [msg]
+
+        for to_transmit in msgs:
+            self.req.send_json(to_transmit)
 
     def handler(self, msg_frames):
         "Handle incoming messages"
@@ -91,9 +126,9 @@ class Node(object):
 
         if not self.connected:
             self.connected = True
-            self.send_to_broker(
-                {"type": "helloResponse", "source": self.name}
-            )
+            self.send_to_broker({"type": "helloResponse", "source": self.name})
+
+            self.role = self.become_follower()
         else:
             self.log(
                 "Received unexpected helloMessage after first connection, ignoring."
@@ -101,12 +136,57 @@ class Node(object):
 
     def append_entries_handler(self, msg):
         "Handle append entry requests"
+        pass
 
+    def append_entries_response_handler(self, msg):
+        "Handle append entry responses (as the leader)"
         pass
 
     def request_vote_handler(self, msg):
         "Handle request vote requests"
         pass
+
+    def vote_response_handler(self, msg):
+        "Handle request vote responses"
+        pass
+
+    def become_follower(self):
+        "Transition to follower role and start a timeout"
+
+        self.role = Role.Follower
+        self.set_timeout()
+
+    def start_election(self):
+        "Start an election by requesting a vote from each node"
+
+        # req = RequestVote()
+
+        # self.term = 0         # latest term the server has seen
+        # self.voted_for = None # candidate_id that received vote in current term
+        # self.ledger = []      # ledger entries for state machine
+        # self.store = {}       # store that is updated as ledger entries are commited
+
+        # # Volatile state
+        # self.commit_index = 0 # index of the highest ledger entry known to be commited
+        # self.last_applied = 0 # index of the highest ledger entry applied
+
+    def set_timeout(self):
+        "Add an election timeout"
+
+        # Clear any pending timeout
+        self.clear_timeout()
+
+        interval = randint(TIMEOUT_INF, TIMEOUT_SUP) / 1000
+        self._timeout = self.loop.add_timeout(time() + interval, self.start_election)
+
+    def clear_timeout(self):
+        "Clear a pending timeout"
+
+        if not self._timeout:
+            return
+
+        self.loop.remove_timeout(self._timeout)
+        self._timeout = None
 
     def _setup_sockets(self, pub, router):
         "Set up ZMQ sockets"
@@ -136,6 +216,7 @@ class Node(object):
         self.handlers = {
             "hello": self.hello_response_handler,
             "appendEntries": self.append_entries_handler,
+            # TODO
         }
 
     def shutdown(self, _, __):
