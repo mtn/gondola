@@ -1,11 +1,14 @@
 "A Raft Node"
 
-import sys, zmq, signal, json, tornado
-
+import sys
+import signal
+import json
 from time import time
-from random import randint
 from enum import Enum, auto
+from random import randint
+
 from zmq.eventloop import ioloop, zmqstream
+import zmq
 
 from rpc import RPC, RequestVote
 
