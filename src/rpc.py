@@ -64,6 +64,7 @@ class VoteResponse(RPC):
 
         return [
             {
+                "type": "voteResponse",
                 "source": self.src,
                 "destination": self.dests[0],
                 "term": self.term,

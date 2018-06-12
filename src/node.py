@@ -104,6 +104,8 @@ class Node(object):
             msgs = [msg]
 
         for to_transmit in msgs:
+            assert to_transmit["source"] is not None
+            self.log("TRANSMITTING {}".format(to_transmit))
             self.req.send_json(to_transmit)
 
     def handler(self, msg_frames):
@@ -121,8 +123,9 @@ class Node(object):
         msg = json.loads(msg_frames[2])
 
         if msg["type"] in self.handlers:
-            handle_fn = self.handlers[msg["type"]]
-            handle_fn(msg)
+            if self.connected or msg["type"] == "hello":
+                handle_fn = self.handlers[msg["type"]]
+                handle_fn(msg)
         else:
             self.log("Message received with unexpected type {}".format(msg["type"]))
 
@@ -132,6 +135,8 @@ class Node(object):
         if not self.connected:
             self.connected = True
             self.send_to_broker({"type": "helloResponse", "source": self.name})
+
+            self.log("I'm {} and I've said hello".format(self.name))
 
             self.role = self.become_follower()
         else:
@@ -172,6 +177,7 @@ class Node(object):
             granted = True
             self.set_timeout()
 
+    # def __init__(self, src, dests, term, vote_granted):
         self.send_to_broker(
             VoteResponse(self.name, [msg["source"]], self.current_term, granted)
         )
