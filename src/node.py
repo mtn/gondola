@@ -10,9 +10,11 @@ from random import randint
 from zmq.eventloop import ioloop, zmqstream
 import zmq
 
-from rpc import RPC, RequestVote
+from rpc import RPC, RequestVote, VoteResponse
 
 # pylint: disable=too-many-instance-attributes
+# pylint: disable=missing-docstring
+# pylint: disable=bad-continuation
 
 ioloop.install()
 
@@ -61,7 +63,7 @@ class Node(object):
         self.role = None
 
         # Persistent state
-        self.term = 0  # latest term the server has seen
+        self.current_term = 0  # latest term the server has seen
         self.voted_for = None  # candidate_id that received vote in current term
         self.ledger = []  # ledger entries for state machine
         self.store = {}  # store that is updated as ledger entries are commited
@@ -147,11 +149,36 @@ class Node(object):
 
     def request_vote_handler(self, msg):
         "Handle request vote requests"
-        pass
+        self.log_debug("Handling vote request")
+
+        if self.current_term < msg["term"]:
+            self.step_down(msg["term"])
+
+        granted = False
+
+        if (
+            self.current_term == msg["term"]
+            and self.voted_for in [None, msg["source"]]
+            and (
+                msg["lastLogTerm"] > self.log_term(len(self.ledger))
+                or (
+                    msg["lastLogTerm"] == self.log_term(len(self.ledger))
+                    and msg["lastLogIndex"] >= len(self.ledger)
+                )
+            )
+        ):
+
+            self.voted_for = msg["source"]
+            granted = True
+            self.set_timeout()
+
+        self.send_to_broker(
+            VoteResponse(self.name, [msg["source"]], self.current_term, granted)
+        )
 
     def vote_response_handler(self, msg):
         "Handle request vote responses"
-        pass
+        self.log("handling vote response")
 
     def become_follower(self):
         "Transition to follower role and start an election timer"
@@ -162,7 +189,7 @@ class Node(object):
     def start_election(self):
         "Start an election by requesting a vote from each node"
 
-        self.log("Starting election")
+        self.log("Starting an election")
 
         if self.ledger:
             last_log_term = self.ledger[-1].term
@@ -171,7 +198,11 @@ class Node(object):
 
         self.send_to_broker(
             RequestVote(
-                self.name, self.peers, self.term, len(self.ledger), last_log_term
+                self.name,
+                self.peers,
+                self.current_term,
+                len(self.ledger),
+                last_log_term,
             )
         )
 
@@ -193,8 +224,25 @@ class Node(object):
         self.loop.remove_timeout(self._timeout)
         self._timeout = None
 
+    def step_down(self, new_term):
+        "Step down as leader"
+
+        self.current_term = new_term
+        self.role = Role.Follower
+        self.voted_for = None
+
+        self.set_timeout()
+
+    def log_term(self, ind):
+        "A safe accessor for indexing into the ledger"
+
+        if ind < 0 or ind >= len(self.ledger):
+            return 0
+        return self.ledger[ind - 1].term
+
     def _setup_sockets(self, pub, router):
         "Set up ZMQ sockets"
+        # pylint: disable=no-member
 
         self.sub_sock = self.context.socket(zmq.SUB)
         self.sub_sock.connect(pub)

@@ -42,7 +42,7 @@ class RequestVote(RPC):
                     "destination": dest,
                     "term": self.term,
                     "lastLogIndex": self.last_index,
-                    "lastTerm": self.last_term,
+                    "lastLogTerm": self.last_term,
                 }
             )
 
@@ -55,7 +55,7 @@ class VoteResponse(RPC):
     def __init__(self, src, dests, term, vote_granted):
         RPC.__init__(self, src, dests)
 
-        # The node's current term, so the candidate can update itself
+        # The node's current term, so the candidate can update itself if needed
         self.term = term
         self.vote_granted = vote_granted
 
