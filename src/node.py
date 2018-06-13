@@ -18,9 +18,9 @@ from rpc import RPC, RequestVote, VoteResponse
 
 ioloop.install()
 
-# TODO conf
-TIMEOUT_INF = 150
-TIMEOUT_SUP = 300
+# TODO conf, make these shorter
+TIMEOUT_INF = 1500
+TIMEOUT_SUP = 3000
 
 
 class Role(Enum):
@@ -61,6 +61,7 @@ class Node(object):
         self.connected = False
         self.peers = peers
         self.role = None
+        self.leader = None
 
         # Persistent state
         self.current_term = 0  # latest term the server has seen
@@ -72,9 +73,9 @@ class Node(object):
         self.commit_index = 0  # index of the highest ledger entry known to be commited
         self.last_applied = 0  # index of the highest ledger entry applied
 
-        # Volatile state; only used when acting as a leader
-        self.next_index = []  # index of the next ledger entry to send each server
-        self.match_index = []  # index of the highest ledger entry known to be replicated
+        # Volatile state; only used when acting as a leader or candidate
+        # Invalidated on each new term
+        self.init_term_state()
 
     def log(self, msg):
         "Print log messages"
@@ -104,8 +105,7 @@ class Node(object):
             msgs = [msg]
 
         for to_transmit in msgs:
-            assert to_transmit["source"] is not None
-            self.log("TRANSMITTING {}".format(to_transmit))
+            self.log("Sending {}".format(to_transmit))
             self.req.send_json(to_transmit)
 
     def handler(self, msg_frames):
@@ -123,22 +123,23 @@ class Node(object):
         msg = json.loads(msg_frames[2])
 
         if msg["type"] in self.handlers:
+            # Messages from before we've said hello are dropped
             if self.connected or msg["type"] == "hello":
                 handle_fn = self.handlers[msg["type"]]
                 handle_fn(msg)
         else:
             self.log("Message received with unexpected type {}".format(msg["type"]))
 
-    def hello_response_handler(self, _):
+    def hello_request_handler(self, _):
         "Response to the broker 'hello' with a 'helloResponse'"
 
         if not self.connected:
             self.connected = True
             self.send_to_broker({"type": "helloResponse", "source": self.name})
 
-            self.log("I'm {} and I've said hello".format(self.name))
+            self.log_debug("I'm {} and I've said hello".format(self.name))
 
-            self.role = self.become_follower()
+            self.become_follower()
         else:
             self.log(
                 "Received unexpected helloMessage after first connection, ignoring."
@@ -154,7 +155,7 @@ class Node(object):
 
     def request_vote_handler(self, msg):
         "Handle request vote requests"
-        self.log_debug("Handling vote request")
+        self.log_debug("Handling vote request from {}".format(msg["source"]))
 
         if self.current_term < msg["term"]:
             self.step_down(msg["term"])
@@ -175,44 +176,79 @@ class Node(object):
 
             self.voted_for = msg["source"]
             granted = True
-            self.set_timeout()
+            self.set_election_timeout()
 
-    # def __init__(self, src, dests, term, vote_granted):
         self.send_to_broker(
             VoteResponse(self.name, [msg["source"]], self.current_term, granted)
         )
 
     def vote_response_handler(self, msg):
         "Handle request vote responses"
-        self.log("handling vote response")
+        self.log_debug("Handling vote response")
 
-    def become_follower(self):
-        "Transition to follower role and start an election timer"
+        if self.current_term < msg["term"]:
+            self.step_down(msg["term"])
 
-        self.role = Role.Follower
-        self.set_timeout()
+        if self.role == Role.Candidate and self.current_term == msg["term"]:
+            self.clear_timeout(name=msg["source"])
+            self.vote_granted[msg["source"]] = msg["voteGranted"]
+
+        # Become a leader, if possible (function checks the votes)
+        self.log("TRYING TO BECOME LEADER")
+        self.become_leader()
 
     def start_election(self):
         "Start an election by requesting a vote from each node"
-
         self.log("Starting an election")
 
-        if self.ledger:
-            last_log_term = self.ledger[-1].term
-        else:
-            last_log_term = 0
+        self.log("ROLE {}".format(self.role))
+        if self.role in [Role.Follower, Role.Candidate]:
+            self.set_election_timeout()
 
-        self.send_to_broker(
-            RequestVote(
-                self.name,
-                self.peers,
-                self.current_term,
-                len(self.ledger),
-                last_log_term,
+            self.current_term += 1  # Increment term
+            self.voted_for = self.name  # Vote for self
+            self.role = Role.Candidate
+
+            # TODO what about the to_send indices, etc.
+            self.init_term_state()
+
+            self.send_to_broker(
+                RequestVote(
+                    self.name,
+                    self.peers,
+                    self.current_term,
+                    len(self.ledger),
+                    self.log_term(len(self.ledger)),
+                )
             )
-        )
 
-    def set_timeout(self):
+    def become_follower(self):
+        "Transition to follower role and start an election timer"
+        self.log_debug("Becoming a follower")
+
+        self.role = Role.Follower
+        self.set_election_timeout()
+
+    def become_leader(self):
+        "Transition to a leader state, if enough votes have been received"
+
+        if (
+            self.role == Role.Candidate
+            and sum(self.vote_granted.values()) + 1 > len(self.peers) / 2
+        ):
+            self.log("BECOMING LEADER")
+            self.role = Role.Leader
+            self.leader = self.name
+
+            for peer in self.peers:
+                self.next_index[peer] = len(self.ledger) + 1
+
+                # TODO append entries heartbeat
+
+        else:
+            self.log("FAILED TO BECOME LEADER")
+
+    def set_election_timeout(self):
         "Add an election timeout"
 
         # Clear any pending timeout
@@ -221,8 +257,21 @@ class Node(object):
         interval = randint(TIMEOUT_INF, TIMEOUT_SUP) / 1000
         self._timeout = self.loop.add_timeout(time() + interval, self.start_election)
 
-    def clear_timeout(self):
-        "Clear a pending timeout"
+    def clear_timeout(self, name=None):
+        """
+        Clear a pending timeout.
+        If no arguments are passed, the election timeout is reset.
+        Otherwise, use the name to index into the RPC timeouts.
+        """
+
+        if name:
+            assert name in self.rpc_timeouts
+
+            if self.rpc_timeouts[name]:
+                self.loop.remove_timeout(self.rpc_timeouts[name])
+                self.rpc_timeouts[name] = None
+
+            return
 
         if not self._timeout:
             return
@@ -237,14 +286,33 @@ class Node(object):
         self.role = Role.Follower
         self.voted_for = None
 
-        self.set_timeout()
+        if not self._timeout:
+            self.set_election_timeout()
 
     def log_term(self, ind):
-        "A safe accessor for indexing into the ledger"
+        """
+        A safe accessor for indexing into the ledger.
+        The interface is 1-indexed, like Ongaro's example.
+        """
 
-        if ind < 0 or ind >= len(self.ledger):
+        if ind < 1 or ind >= len(self.ledger):
             return 0
         return self.ledger[ind - 1].term
+
+    def init_term_state(self):
+        "Initialize state that is tracked for a single term"
+
+        # Index of the next ledger entry to send each server
+        self.next_index = {p: 1 for p in self.peers}
+
+        # Index of the highest ledger entry known to be replicated
+        self.match_index = {p: 0 for p in self.peers}
+
+        # True for each peer that has granted its vote
+        self.vote_granted = {p: False for p in self.peers}
+
+        # Timeouts for peer rpcs (send another rpc when triggered)
+        self.rpc_timeouts = {p: None for p in self.peers}
 
     def _setup_sockets(self, pub, router):
         "Set up ZMQ sockets"
@@ -273,7 +341,7 @@ class Node(object):
 
     def _setup_message_handlers(self):
         self.handlers = {
-            "hello": self.hello_response_handler,
+            "hello": self.hello_request_handler,
             "requestVote": self.request_vote_handler,
             "voteResponse": self.vote_response_handler,
             "appendEntries": self.append_entries_handler,

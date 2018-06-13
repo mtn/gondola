@@ -3,5 +3,5 @@ start -n node-2
 start -n node-3
 start -n node-4
 start -n node-5
-wait -t 3
+wait -t 10
 quit
