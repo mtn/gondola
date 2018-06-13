@@ -1,4 +1,4 @@
-"A node log entry"
+"Ledger and related types"
 
 # pylint: disable=too-few-public-methods
 # pylint: disable=missing-docstring
@@ -7,16 +7,23 @@
 class Request(object):
     pass
 
-
 class SetRequest(Request):
-    pass
+    def __init__(self, key, val):
+        self.key = key
+        self.val = val
 
+    def __repr__(self):
+        return "SET {}: {}".format(self.key, self.val)
 
 class GetRequest(Request):
-    pass
+    def __init__(self, key):
+        self.key = key
 
-class LogEntry(object):
-    "An entry in a node's log"
+    def __repr__(self):
+        return "GET {}".format(self.key)
+
+class LedgerEntry(object):
+    "An entry in a node's ledger"
 
     def __init__(self, term, entry):
         """
@@ -29,4 +36,4 @@ class LogEntry(object):
         self.entry = entry
 
     def __repr__(self):
-        return "LogEntry"
+        return "LedgerEntry({},{})".format(self.term, self.entry)
