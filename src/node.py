@@ -10,7 +10,7 @@ from random import randint
 from zmq.eventloop import ioloop, zmqstream
 import zmq
 
-from rpc import RPC, RequestVote, VoteResponse
+from rpc import RPC, RequestVote, VoteResponse, AppendEntries, AppendResponse
 
 # pylint: disable=too-many-instance-attributes
 # pylint: disable=missing-docstring
@@ -21,6 +21,8 @@ ioloop.install()
 # TODO conf, make these shorter
 TIMEOUT_INF = 1500
 TIMEOUT_SUP = 3000
+HEARTBEAT_INF = 250
+HEARTBEAT_SUP = 1000
 
 
 class Role(Enum):
@@ -55,7 +57,7 @@ class Node(object):
         self._setup_sockets(pub, router)
         self._setup_signal_handling()
         self._setup_message_handlers()
-        self._timeout = None
+        self.election_timeout = None
 
         self.debug = debug
         self.connected = False
@@ -194,14 +196,18 @@ class Node(object):
             self.vote_granted[msg["source"]] = msg["voteGranted"]
 
         # Become a leader, if possible (function checks the votes)
-        self.log("TRYING TO BECOME LEADER")
-        self.become_leader()
 
-    def start_election(self):
+        self.log_debug("Votes received: {}".format(sum(self.vote_granted.values())))
+        if (
+            self.role == Role.Candidate
+            and sum(self.vote_granted.values()) + 1 > len(self.peers) / 2
+        ):
+            self.become_leader()
+
+    def become_candidate(self):
         "Start an election by requesting a vote from each node"
-        self.log("Starting an election")
+        self.log_debug("Starting an election")
 
-        self.log("ROLE {}".format(self.role))
         if self.role in [Role.Follower, Role.Candidate]:
             self.set_election_timeout()
 
@@ -229,24 +235,29 @@ class Node(object):
         self.role = Role.Follower
         self.set_election_timeout()
 
+    # pylint: disable=attribute-defined-outside-init
     def become_leader(self):
-        "Transition to a leader state, if enough votes have been received"
+        "Transition to a leader state. Assumes votes have been checked by caller."
+        self.log_debug("Won election, becoming leader")
 
-        if (
-            self.role == Role.Candidate
-            and sum(self.vote_granted.values()) + 1 > len(self.peers) / 2
-        ):
-            self.log("BECOMING LEADER")
-            self.role = Role.Leader
-            self.leader = self.name
+        self.role = Role.Leader
+        self.leader = self.name
 
-            for peer in self.peers:
-                self.next_index[peer] = len(self.ledger) + 1
+        self.match_index = {p: 0 for p in self.peers}
+        self.next_index = {p: self.commit_index + 1 for p in self.match_index}
 
-                # TODO append entries heartbeat
+        self.send_append_entries()
 
-        else:
-            self.log("FAILED TO BECOME LEADER")
+        # TODO append entries heartbeat
+
+    def send_append_entries(self):
+        "Send out append entries and schedule next heartbeat timeout"
+
+        for peer in self.peers:
+            if peer == self.leader:
+                continue
+
+            # self.send_to_broker(AppendEntries())
 
     def set_election_timeout(self):
         "Add an election timeout"
@@ -255,7 +266,21 @@ class Node(object):
         self.clear_timeout()
 
         interval = randint(TIMEOUT_INF, TIMEOUT_SUP) / 1000
-        self._timeout = self.loop.add_timeout(time() + interval, self.start_election)
+        self.election_timeout = self.loop.add_timeout(
+            time() + interval, self.become_candidate
+        )
+
+    def set_rpc_timeout(self, name):
+        "Set an RPC (heartbeat) timeout"
+        assert name in self.rpc_timeouts
+
+        # Clear any pending timeout
+        self.clear_timeout(name)
+
+        interval = randint(HEARTBEAT_INF, HEARTBEAT_SUP) / 1000
+        self.rpc_timeouts[name] = self.loop.add_timeout(
+            time() + interval, self.send_append_entries
+        )
 
     def clear_timeout(self, name=None):
         """
@@ -273,11 +298,11 @@ class Node(object):
 
             return
 
-        if not self._timeout:
+        if not self.election_timeout:
             return
 
-        self.loop.remove_timeout(self._timeout)
-        self._timeout = None
+        self.loop.remove_timeout(self.election_timeout)
+        self.election_timeout = None
 
     def step_down(self, new_term):
         "Step down as leader"
@@ -286,7 +311,7 @@ class Node(object):
         self.role = Role.Follower
         self.voted_for = None
 
-        if not self._timeout:
+        if not self.election_timeout:
             self.set_election_timeout()
 
     def log_term(self, ind):

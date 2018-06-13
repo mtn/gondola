@@ -7,7 +7,9 @@
 class Request(object):
     pass
 
+
 class SetRequest(Request):
+
     def __init__(self, key, val):
         self.key = key
         self.val = val
@@ -15,12 +17,15 @@ class SetRequest(Request):
     def __repr__(self):
         return "SET {}: {}".format(self.key, self.val)
 
+
 class GetRequest(Request):
+
     def __init__(self, key):
         self.key = key
 
     def __repr__(self):
         return "GET {}".format(self.key)
+
 
 class LedgerEntry(object):
     "An entry in a node's ledger"
