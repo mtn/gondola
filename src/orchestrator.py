@@ -1,6 +1,7 @@
 """
-Object for configuration-related node methods (eg. logging)
-Design somewhat based on zatt (github.com/simonacca/zatt)
+Object for configuration-related node methods (eg. logging).
+Also, avoids name collision of self.log.
+Design somewhat based on zatt (github.com/simonacca/zatt).
 """
 
 from zmq.eventloop import ioloop, zmqstream
@@ -14,7 +15,9 @@ from rpc import RPC
 
 ioloop.install()
 
+
 class Orchestrator(object):
+
     def __init__(self, node, name, debug, pub, router):
         self.node = node
         self.name = name

@@ -28,6 +28,7 @@ class Role(Enum):
     Candidate = auto()
     Leader = auto()
 
+
 class Node(object):
     "Raft node"
 
@@ -61,8 +62,8 @@ class Node(object):
         # Persistent state
         self.current_term = 0  # latest term the server has seen
         self.voted_for = None  # candidate_id that received vote in current term
-        self.log = []          # log entries for state machine
-        self.store = {}        # store that is updated as log entries are commited
+        self.log = []  # log entries for state machine
+        self.store = {}  # store that is updated as log entries are commited
 
         # Volatile state
         self.commit_index = 0  # index of the highest log entry known to be commited
@@ -93,7 +94,6 @@ class Node(object):
     def handler(self, msg_frames):
         "Handle incoming messages"
 
-        # deal with bytes encoding
         msg_frames = [i.decode() for i in msg_frames]
 
         assert len(msg_frames) == 3, (
@@ -106,11 +106,14 @@ class Node(object):
 
         if msg["type"] in self.handlers:
             # Messages from before we've said hello are dropped
+            # Failing to do so results in errors with chistributed
             if self.connected or msg["type"] == "hello":
                 handle_fn = self.handlers[msg["type"]]
                 handle_fn(msg)
         else:
-            self.orchestrator.log("Message received with unexpected type {}".format(msg["type"]))
+            self.orchestrator.log(
+                "Message received with unexpected type {}".format(msg["type"])
+            )
 
     def hello_request_handler(self, _):
         "Response to the broker 'hello' with a 'helloResponse'"
@@ -134,12 +137,10 @@ class Node(object):
         self.set_election_timeout()
 
         term_is_current = self.current_term <= msg["term"]
-        prev_log_term_matches = msg["prevLogTerm"] is None #TODO
+        prev_log_term_matches = msg["prevLogTerm"] is None  # TODO
 
         if term_is_current:
             pass
-
-
 
     def append_response_handler(self, msg):
         "Handle append entry responses (as the leader)"
@@ -147,7 +148,9 @@ class Node(object):
 
     def request_vote_handler(self, msg):
         "Handle request vote requests"
-        self.orchestrator.log_debug("Handling vote request from {}".format(msg["source"]))
+        self.orchestrator.log_debug(
+            "Handling vote request from {}".format(msg["source"])
+        )
 
         if self.current_term < msg["term"]:
             self.step_down(msg["term"])
@@ -183,7 +186,9 @@ class Node(object):
 
         # Become a leader, if possible (function checks the votes)
 
-        self.orchestrator.log_debug("Votes received: {}".format(sum(self.vote_granted.values())))
+        self.orchestrator.log_debug(
+            "Votes received: {}".format(sum(self.vote_granted.values()))
+        )
         if (
             self.role == Role.Candidate
             and sum(self.vote_granted.values()) + 1 > len(self.peers) / 2
