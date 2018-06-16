@@ -23,4 +23,4 @@ if __name__ == "__main__":
         in_args.peer,
         in_args.debug,
     )
-    n.run()
+    n.orchestrator.run()

@@ -7,16 +7,13 @@ from time import time
 from enum import Enum, auto
 from random import randint
 
-from zmq.eventloop import ioloop, zmqstream
-import zmq
-
 from rpc import RPC, RequestVote, VoteResponse, AppendEntries, AppendResponse
+from orchestrator import Orchestrator
 
 # pylint: disable=too-many-instance-attributes
 # pylint: disable=missing-docstring
 # pylint: disable=bad-continuation
 
-ioloop.install()
 
 # TODO conf, make these shorter
 TIMEOUT_INF = 1500
@@ -30,7 +27,6 @@ class Role(Enum):
     Follower = auto()
     Candidate = auto()
     Leader = auto()
-
 
 class Node(object):
     "Raft node"
@@ -51,15 +47,12 @@ class Node(object):
         """
         self.name = name
 
-        # Set up the loop, ZMQ sockets, and handlers
-        self.loop = ioloop.IOLoop.instance()
-        self.context = zmq.Context()
-        self._setup_sockets(pub, router)
-        self._setup_signal_handling()
-        self._setup_message_handlers()
         self.election_timeout = None
 
-        self.debug = debug
+        self._setup_signal_handling()
+        self._setup_message_handlers()
+        self.orchestrator = Orchestrator(self, self.name, debug, pub, router)
+
         self.connected = False
         self.peers = peers
         self.role = None
@@ -68,29 +61,16 @@ class Node(object):
         # Persistent state
         self.current_term = 0  # latest term the server has seen
         self.voted_for = None  # candidate_id that received vote in current term
-        self.ledger = []  # ledger entries for state machine
-        self.store = {}  # store that is updated as ledger entries are commited
+        self.log = []          # log entries for state machine
+        self.store = {}        # store that is updated as log entries are commited
 
         # Volatile state
-        self.commit_index = 0  # index of the highest ledger entry known to be commited
-        self.last_applied = 0  # index of the highest ledger entry applied
+        self.commit_index = 0  # index of the highest log entry known to be commited
+        self.last_applied = 0  # index of the highest log entry applied
 
         # Volatile state; only used when acting as a leader or candidate
         # Invalidated on each new term
         self.init_term_state()
-
-    def log(self, msg):
-        "Print log messages"
-        print(">>> %10s -- %s" % (self.name, msg))
-
-    def log_debug(self, msg):
-        "Print message if debug mode is enabled (--debug)"
-        if self.debug:
-            print(">>> %10s -- %s" % (self.name, msg))
-
-    def run(self):
-        "Start the loop"
-        self.loop.start()
 
     def handle_broker_message(self, msg_frames):
         "Ignore broker errors"
@@ -107,8 +87,8 @@ class Node(object):
             msgs = [msg]
 
         for to_transmit in msgs:
-            self.log("Sending {}".format(to_transmit))
-            self.req.send_json(to_transmit)
+            self.orchestrator.log("Sending {}".format(to_transmit))
+            self.orchestrator.req.send_json(to_transmit)
 
     def handler(self, msg_frames):
         "Handle incoming messages"
@@ -130,7 +110,7 @@ class Node(object):
                 handle_fn = self.handlers[msg["type"]]
                 handle_fn(msg)
         else:
-            self.log("Message received with unexpected type {}".format(msg["type"]))
+            self.orchestrator.log("Message received with unexpected type {}".format(msg["type"]))
 
     def hello_request_handler(self, _):
         "Response to the broker 'hello' with a 'helloResponse'"
@@ -139,11 +119,11 @@ class Node(object):
             self.connected = True
             self.send_to_broker({"type": "helloResponse", "source": self.name})
 
-            self.log_debug("I'm {} and I've said hello".format(self.name))
+            self.orchestrator.log_debug("I'm {} and I've said hello".format(self.name))
 
             self.become_follower()
         else:
-            self.log(
+            self.orchestrator.log(
                 "Received unexpected helloMessage after first connection, ignoring."
             )
 
@@ -154,7 +134,10 @@ class Node(object):
         self.set_election_timeout()
 
         term_is_current = self.current_term <= msg["term"]
+        prev_log_term_matches = msg["prevLogTerm"] is None #TODO
 
+        if term_is_current:
+            pass
 
 
 
@@ -164,7 +147,7 @@ class Node(object):
 
     def request_vote_handler(self, msg):
         "Handle request vote requests"
-        self.log_debug("Handling vote request from {}".format(msg["source"]))
+        self.orchestrator.log_debug("Handling vote request from {}".format(msg["source"]))
 
         if self.current_term < msg["term"]:
             self.step_down(msg["term"])
@@ -173,9 +156,9 @@ class Node(object):
 
         term_is_current = self.current_term <= msg["term"]
         can_vote = self.voted_for in [None, msg["source"]]
-        log_up_to_date = msg["lastLogTerm"] > self.log_term(len(self.ledger)) or (
-            msg["lastLogTerm"] == self.log_term(len(self.ledger))
-            and msg["lastLogIndex"] >= len(self.ledger)
+        log_up_to_date = msg["lastLogTerm"] > self.log_term(len(self.log)) or (
+            msg["lastLogTerm"] == self.log_term(len(self.log))
+            and msg["lastLogIndex"] >= len(self.log)
         )
 
         if term_is_current and can_vote and log_up_to_date:
@@ -189,7 +172,7 @@ class Node(object):
 
     def vote_response_handler(self, msg):
         "Handle request vote responses"
-        self.log_debug("Handling vote response")
+        self.orchestrator.log_debug("Handling vote response")
 
         if self.current_term < msg["term"]:
             self.step_down(msg["term"])
@@ -200,7 +183,7 @@ class Node(object):
 
         # Become a leader, if possible (function checks the votes)
 
-        self.log_debug("Votes received: {}".format(sum(self.vote_granted.values())))
+        self.orchestrator.log_debug("Votes received: {}".format(sum(self.vote_granted.values())))
         if (
             self.role == Role.Candidate
             and sum(self.vote_granted.values()) + 1 > len(self.peers) / 2
@@ -209,7 +192,7 @@ class Node(object):
 
     def become_candidate(self):
         "Start an election by requesting a vote from each node"
-        self.log_debug("Starting an election")
+        self.orchestrator.log_debug("Starting an election")
 
         if self.role in [Role.Follower, Role.Candidate]:
             self.set_election_timeout()
@@ -230,14 +213,14 @@ class Node(object):
                     self.name,
                     self.peers,
                     self.current_term,
-                    len(self.ledger),
-                    self.log_term(len(self.ledger)),
+                    len(self.log),
+                    self.log_term(len(self.log)),
                 )
             )
 
     def become_follower(self):
         "Transition to follower role and start an election timer"
-        self.log_debug("Becoming a follower")
+        self.orchestrator.log_debug("Becoming a follower")
 
         self.role = Role.Follower
         self.set_election_timeout()
@@ -245,7 +228,7 @@ class Node(object):
     # pylint: disable=attribute-defined-outside-init
     def become_leader(self):
         "Transition to a leader state. Assumes votes have been checked by caller."
-        self.log_debug("Won election, becoming leader")
+        self.orchestrator.log_debug("Won election, becoming leader")
 
         # Clear election timeout, if one is set
         self.clear_timeout()
@@ -276,7 +259,7 @@ class Node(object):
         self.clear_timeout()
 
         interval = randint(TIMEOUT_INF, TIMEOUT_SUP) / 1000
-        self.election_timeout = self.loop.add_timeout(
+        self.election_timeout = self.orchestrator.loop.add_timeout(
             time() + interval, self.become_candidate
         )
 
@@ -288,7 +271,7 @@ class Node(object):
         self.clear_timeout(name)
 
         interval = randint(HEARTBEAT_INF, HEARTBEAT_SUP) / 1000
-        self.rpc_timeouts[name] = self.loop.add_timeout(
+        self.rpc_timeouts[name] = self.orchestrator.loop.add_timeout(
             time() + interval, self.send_append_entries
         )
 
@@ -303,7 +286,7 @@ class Node(object):
             assert name in self.rpc_timeouts
 
             if self.rpc_timeouts[name]:
-                self.loop.remove_timeout(self.rpc_timeouts[name])
+                self.orchestrator.loop.remove_timeout(self.rpc_timeouts[name])
                 self.rpc_timeouts[name] = None
 
             return
@@ -311,7 +294,7 @@ class Node(object):
         if not self.election_timeout:
             return
 
-        self.loop.remove_timeout(self.election_timeout)
+        self.orchestrator.loop.remove_timeout(self.election_timeout)
         self.election_timeout = None
 
     def step_down(self, new_term):
@@ -326,21 +309,21 @@ class Node(object):
 
     def log_term(self, ind):
         """
-        A safe accessor for indexing into the ledger.
+        A safe accessor for indexing into the log.
         The interface is 1-indexed, like Ongaro's example.
         """
 
-        if ind < 1 or ind >= len(self.ledger):
+        if ind < 1 or ind >= len(self.log):
             return 0
-        return self.ledger[ind - 1].term
+        return self.log[ind - 1].term
 
     def init_term_state(self):
         "Initialize state that is tracked for a single term"
 
-        # Index of the next ledger entry to send each server
+        # Index of the next log entry to send each server
         self.next_index = {p: 1 for p in self.peers}
 
-        # Index of the highest ledger entry known to be replicated
+        # Index of the highest log entry known to be replicated
         self.match_index = {p: 0 for p in self.peers}
 
         # True for each peer that has granted its vote
@@ -348,25 +331,6 @@ class Node(object):
 
         # Timeouts for peer rpcs (send another rpc when triggered)
         self.rpc_timeouts = {p: None for p in self.peers}
-
-    def _setup_sockets(self, pub, router):
-        "Set up ZMQ sockets"
-        # pylint: disable=no-member
-
-        self.sub_sock = self.context.socket(zmq.SUB)
-        self.sub_sock.connect(pub)
-
-        self.sub_sock.setsockopt_string(zmq.SUBSCRIBE, self.name)
-
-        self.sub = zmqstream.ZMQStream(self.sub_sock, self.loop)
-        self.sub.on_recv(self.handler)
-
-        self.req_sock = self.context.socket(zmq.REQ)
-        self.req_sock.connect(router)
-        self.req_sock.setsockopt_string(zmq.IDENTITY, self.name)
-
-        self.req = zmqstream.ZMQStream(self.req_sock, self.loop)
-        self.req.on_recv(self.handle_broker_message)
 
     def _setup_signal_handling(self):
         "Setup signal handlers to gracefully shutdown"
@@ -387,9 +351,9 @@ class Node(object):
         "Shut down gracefully"
 
         if self.connected:
-            self.loop.stop()
-            self.sub_sock.close()
-            self.req_sock.close()
+            self.orchestrator.loop.stop()
+            self.orchestrator.sub_sock.close()
+            self.orchestrator.req_sock.close()
             sys.exit(0)
 
     def __repr__(self):
