@@ -149,7 +149,14 @@ class Node(object):
 
     def append_entries_handler(self, msg):
         "Handle append entry requests"
-        pass
+
+        # Reset the election timeout
+        self.set_election_timeout()
+
+        term_is_current = self.current_term <= msg["term"]
+
+
+
 
     def append_response_handler(self, msg):
         "Handle append entry responses (as the leader)"
@@ -164,18 +171,14 @@ class Node(object):
 
         granted = False
 
-        if (
-            self.current_term == msg["term"]
-            and self.voted_for in [None, msg["source"]]
-            and (
-                msg["lastLogTerm"] > self.log_term(len(self.ledger))
-                or (
-                    msg["lastLogTerm"] == self.log_term(len(self.ledger))
-                    and msg["lastLogIndex"] >= len(self.ledger)
-                )
-            )
-        ):
+        term_is_current = self.current_term <= msg["term"]
+        can_vote = self.voted_for in [None, msg["source"]]
+        log_up_to_date = msg["lastLogTerm"] > self.log_term(len(self.ledger)) or (
+            msg["lastLogTerm"] == self.log_term(len(self.ledger))
+            and msg["lastLogIndex"] >= len(self.ledger)
+        )
 
+        if term_is_current and can_vote and log_up_to_date:
             self.voted_for = msg["source"]
             granted = True
             self.set_election_timeout()
@@ -212,7 +215,11 @@ class Node(object):
             self.set_election_timeout()
 
             self.current_term += 1  # Increment term
-            self.voted_for = self.name  # Vote for self
+
+            # Vote for self
+            self.voted_for = self.name
+            self.vote_granted[self.name] = True
+
             self.role = Role.Candidate
 
             # TODO what about the to_send indices, etc.
@@ -240,6 +247,9 @@ class Node(object):
         "Transition to a leader state. Assumes votes have been checked by caller."
         self.log_debug("Won election, becoming leader")
 
+        # Clear election timeout, if one is set
+        self.clear_timeout()
+
         self.role = Role.Leader
         self.leader = self.name
 
@@ -260,7 +270,7 @@ class Node(object):
             # self.send_to_broker(AppendEntries())
 
     def set_election_timeout(self):
-        "Add an election timeout"
+        "Set the election timeout. If one was already set, override it."
 
         # Clear any pending timeout
         self.clear_timeout()
