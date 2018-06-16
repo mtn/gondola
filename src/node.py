@@ -352,6 +352,10 @@ class Node(object):
             "appendResponse": self.append_response_handler,
         }
 
+    def run(self):
+        "Start the loop"
+        self.orchestrator.loop.start()
+
     def shutdown(self, _, __):
         "Shut down gracefully"
 
