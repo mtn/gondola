@@ -9,6 +9,7 @@ from random import randint
 
 from rpc import RPC, RequestVote, VoteResponse, AppendEntries, AppendResponse
 from orchestrator import Orchestrator
+from log import Log
 
 # pylint: disable=too-many-instance-attributes
 # pylint: disable=missing-docstring
@@ -62,7 +63,7 @@ class Node(object):
         # Persistent state
         self.current_term = 0  # latest term the server has seen
         self.voted_for = None  # candidate_id that received vote in current term
-        self.log = []  # log entries for state machine
+        self.log = Log()  # log entries for state machine
         self.store = {}  # store that is updated as log entries are commited
 
         # Volatile state
@@ -106,7 +107,9 @@ class Node(object):
 
         if not self.connected:
             self.connected = True
-            self.orchestrator.send_to_broker({"type": "helloResponse", "source": self.name})
+            self.orchestrator.send_to_broker(
+                {"type": "helloResponse", "source": self.name}
+            )
 
             self.orchestrator.log_debug("I'm {} and I've said hello".format(self.name))
 
@@ -123,9 +126,13 @@ class Node(object):
         self.set_election_timeout()
 
         term_is_current = self.current_term <= msg["term"]
-        prev_log_term_matches = msg["prevLogTerm"] is None  # TODO
+        # If there is a previous term, then it should match the one in the node's log
+        prev_log_term_matches = (
+            msg["prevLogTerm"] is None
+            or self.log.term(msg["prevLogIndex"]) == msg["prevLogterm"]
+        )
 
-        if term_is_current:
+        if term_is_current and prev_log_term_matches:
             pass
 
     def append_response_handler(self, msg):
@@ -145,8 +152,8 @@ class Node(object):
 
         term_is_current = self.current_term <= msg["term"]
         can_vote = self.voted_for in [None, msg["source"]]
-        log_up_to_date = msg["lastLogTerm"] > self.log_term(len(self.log)) or (
-            msg["lastLogTerm"] == self.log_term(len(self.log))
+        log_up_to_date = msg["lastLogTerm"] > self.log.term() or (
+            msg["lastLogTerm"] == self.log.term()
             and msg["lastLogIndex"] >= len(self.log)
         )
 
@@ -205,7 +212,7 @@ class Node(object):
                     self.peers,
                     self.current_term,
                     len(self.log),
-                    self.log_term(len(self.log)),
+                    self.log.term(),
                 )
             )
 
@@ -297,16 +304,6 @@ class Node(object):
 
         if not self.election_timeout:
             self.set_election_timeout()
-
-    def log_term(self, ind):
-        """
-        A safe accessor for indexing into the log.
-        The interface is 1-indexed, like Ongaro's example.
-        """
-
-        if ind < 1 or ind >= len(self.log):
-            return 0
-        return self.log[ind - 1].term
 
     def init_term_state(self):
         "Initialize state that is tracked for a single term"
