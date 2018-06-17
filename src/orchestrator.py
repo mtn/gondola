@@ -1,5 +1,5 @@
 """
-Object for configuration-related node methods (eg. logging).
+Object for configuration-related node methods (eg. logging, sending messages).
 Also, avoids name collision of self.log.
 Design somewhat based on zatt (github.com/simonacca/zatt).
 """
@@ -23,6 +23,8 @@ class Orchestrator(object):
         self.name = name
         self.debug = debug
 
+        self.connected = False
+
         # Set up the loop, ZMQ sockets, and handlers
         self.loop = ioloop.IOLoop.instance()
         self.context = zmq.Context()
@@ -36,10 +38,6 @@ class Orchestrator(object):
         "Print message if debug mode is enabled (--debug)"
         if self.debug:
             print(">>> %10s -- %s" % (self.name, msg))
-
-    def run(self):
-        "Start the loop"
-        self.loop.start()
 
     def _setup_sockets(self, pub, router):
         "Set up ZMQ sockets"

@@ -77,20 +77,6 @@ class Node(object):
         "Ignore broker errors"
         pass
 
-    def send_to_broker(self, msg):
-        "Send a message to the broker"
-
-        msgs = []
-
-        if isinstance(msg, RPC):
-            msgs = msg.serialize()
-        else:
-            msgs = [msg]
-
-        for to_transmit in msgs:
-            self.orchestrator.log("Sending {}".format(to_transmit))
-            self.orchestrator.req.send_json(to_transmit)
-
     def handler(self, msg_frames):
         "Handle incoming messages"
 
@@ -120,7 +106,7 @@ class Node(object):
 
         if not self.connected:
             self.connected = True
-            self.send_to_broker({"type": "helloResponse", "source": self.name})
+            self.orchestrator.send_to_broker({"type": "helloResponse", "source": self.name})
 
             self.orchestrator.log_debug("I'm {} and I've said hello".format(self.name))
 
@@ -169,7 +155,7 @@ class Node(object):
             granted = True
             self.set_election_timeout()
 
-        self.send_to_broker(
+        self.orchestrator.send_to_broker(
             VoteResponse(self.name, [msg["source"]], self.current_term, granted)
         )
 
@@ -213,7 +199,7 @@ class Node(object):
             # TODO what about the to_send indices, etc.
             self.init_term_state()
 
-            self.send_to_broker(
+            self.orchestrator.send_to_broker(
                 RequestVote(
                     self.name,
                     self.peers,
@@ -255,7 +241,7 @@ class Node(object):
             if peer == self.leader:
                 continue
 
-            # self.send_to_broker(AppendEntries())
+            # self.orchestrator.send_to_broker(AppendEntries())
 
     def set_election_timeout(self):
         "Set the election timeout. If one was already set, override it."

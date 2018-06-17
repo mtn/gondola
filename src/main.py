@@ -1,6 +1,10 @@
+"Entry point, called by chistributed"
+
 import argparse
 from node import Node
 
+# pylint: disable=missing-docstring
+# pylint: disable=invalid-name
 
 def parse_args():
     parser = argparse.ArgumentParser(description="node script for chidistributed")
@@ -11,7 +15,6 @@ def parse_args():
     parser.add_argument("--debug", action="store_true")
 
     return parser.parse_args()
-
 
 if __name__ == "__main__":
     in_args = parse_args()
