@@ -9,7 +9,6 @@ class Request(object):
 
 
 class SetRequest(Request):
-
     def __init__(self, key, val):
         self.key = key
         self.val = val
@@ -19,7 +18,6 @@ class SetRequest(Request):
 
 
 class GetRequest(Request):
-
     def __init__(self, key):
         self.key = key
 
@@ -28,9 +26,8 @@ class GetRequest(Request):
 
 
 class Log(object):
-
     def __init__(self):
-        self.log = []  # [LogEntry]
+        self.entries = []  # [LogEntry]
 
     def term(self, ind=None):
         """
@@ -39,14 +36,24 @@ class Log(object):
         """
 
         if ind is None:
-            return self.log[-1].term
+            return self.entries[-1].term
 
-        if ind < 0 or ind >= len(self.log):
-            return 0
-        return self.log[ind].term
+        if ind < 0 or ind >= len(self.entries):
+            return None
+        return self.entries[ind].term
+
+    def update_until(self, index, entry):
+        "Overwrite the last commited entry"
+
+        # Note that slices exclude the upper index
+        # Since we checked for equality at that index, we exclude it here
+        self.entries = self.entries[0:index] + [entry]
+
+    def append_entries(self, entries, prev_log_index):
+        pass
 
     def __len__(self):
-        return len(self.log)
+        return len(self.entries)
 
 
 class LogEntry(object):

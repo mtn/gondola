@@ -122,22 +122,71 @@ class Node(object):
     def append_entries_handler(self, msg):
         "Handle append entry requests"
 
+        # Step down if this node is the leader and is out of date
+        if self.current_term < msg["term"]:
+            self.step_down(msg["term"])
+
+        # If the term isn't current, we return early
+        if self.current_term > msg["term"]:
+            self.orchestrator.send_to_broker(
+                AppendResponse(
+                    self.name,
+                    [msg["source"]],
+                    self.current_term,
+                    False,
+                    self.commit_index,
+                )
+            )
+            return
+
+        self.leader = msg["source"]
+        self.role = Role.Follower
+
         # Reset the election timeout
         self.set_election_timeout()
 
-        term_is_current = self.current_term <= msg["term"]
         # If there is a previous term, then it should match the one in the node's log
-        prev_log_term_matches = (
+        success = (
             msg["prevLogTerm"] is None
-            or self.log.term(msg["prevLogIndex"]) == msg["prevLogterm"]
+            or self.log.term(msg["prevLogIndex"]) == msg["prevLogTerm"]
         )
 
-        if term_is_current and prev_log_term_matches:
-            pass
+        if success:
+            index = msg["prevLogIndex"]
+
+            for entry in msg["entries"]:
+                index += 1
+
+                if not self.log.term(index) == entry.term:
+                    self.log.update_until(index, entry)
+                self.commit_index = min(msg["leaderCommit"], index)
+        else:
+            index = 0
+
+        self.orchestrator.send_to_broker(
+            AppendResponse(
+                self.name,
+                [msg["source"]],
+                self.current_term,
+                success,
+                self.commit_index,
+            )
+        )
 
     def append_response_handler(self, msg):
         "Handle append entry responses (as the leader)"
-        pass
+
+        peer = msg["source"]
+
+        if self.current_term < msg["term"]:
+            self.step_down(msg["term"])
+
+        elif self.role == Role.Leader and self.current_term == msg["term"]:
+            if msg["success"]:
+                self.match_index[peer] = msg["matchIndex"]
+                self.next_index[peer] = msg["matchIndex"] + 1
+            else:
+                self.next_index[peer] = max(0, self.next_index[peer] - 1)
 
     def request_vote_handler(self, msg):
         "Handle request vote requests"

@@ -7,7 +7,6 @@
 
 
 class RPC(object):
-
     def __init__(self, src, dests):
         """
         src :: String
@@ -127,7 +126,7 @@ class AppendEntries(RPC):
 class AppendResponse(RPC):
     "Response to append entries RPC"
 
-    def __init__(self, src, dests, term, success):
+    def __init__(self, src, dests, term, success, match_index):
         """
         term :: int
             Current term, in case the leader is out of date
@@ -138,6 +137,7 @@ class AppendResponse(RPC):
 
         self.term = term
         self.success = success
+        self.match_index = match_index
 
     def serialize(self):
         return [
@@ -147,5 +147,6 @@ class AppendResponse(RPC):
                 "desination": self.dests[0],
                 "term": self.term,
                 "success": self.success,
+                "matchIndex": self.match_index,
             }
         ]
