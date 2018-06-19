@@ -6,6 +6,7 @@ import json
 from time import time
 from enum import Enum, auto
 from random import randint
+from math import floor
 
 from rpc import RPC, RequestVote, VoteResponse, AppendEntries, AppendResponse
 from orchestrator import Orchestrator
@@ -17,7 +18,7 @@ from log import Log
 
 
 # TODO conf, make these shorter
-TIMEOUT_INF = 1500
+TIMEOUT_INF = 2000
 TIMEOUT_SUP = 3000
 HEARTBEAT_INF = 250
 HEARTBEAT_SUP = 1000
@@ -208,10 +209,19 @@ class Node(object):
 
         term_is_current = self.current_term <= msg["term"]
         can_vote = self.voted_for in [None, msg["source"]]
-        log_up_to_date = msg["lastLogTerm"] > self.log.term() or (
-            msg["lastLogTerm"] == self.log.term()
-            and msg["lastLogIndex"] >= len(self.log)
-        )
+
+        # If there's nothing in our log, they must be at least as up-to-date
+        if not self.log.term():
+            log_up_to_date = True
+        else:
+            # If we have log entries and they don't, they must be out of date
+            if msg["lastLogTerm"] is None:
+                log_up_to_date = False
+            else:
+                log_up_to_date = msg["lastLogTerm"] > self.log.term() or (
+                    msg["lastLogTerm"] == self.log.term()
+                    and msg["lastLogIndex"] >= len(self.log)
+                )
 
         if term_is_current and can_vote and log_up_to_date:
             self.voted_for = msg["source"]
@@ -224,8 +234,11 @@ class Node(object):
 
     def vote_response_handler(self, msg):
         "Handle request vote responses"
-        self.orchestrator.log_debug("Handling vote response")
+        self.orchestrator.log_debug(
+            "Handling vote response from {}".format(msg["source"])
+        )
 
+        # If the responder has a more current term, we're stale
         if self.current_term < msg["term"]:
             self.step_down(msg["term"])
 
@@ -233,14 +246,11 @@ class Node(object):
             self.clear_timeout(name=msg["source"])
             self.vote_granted[msg["source"]] = msg["voteGranted"]
 
-        # Become a leader, if possible (function checks the votes)
-
         self.orchestrator.log_debug(
             "Votes received: {}".format(sum(self.vote_granted.values()))
         )
-        if (
-            self.role == Role.Candidate
-            and sum(self.vote_granted.values()) + 1 > len(self.peers) / 2
+        if self.role == Role.Candidate and sum(self.vote_granted.values()) >= floor(
+            len(self.peers) / 2 + 1
         ):
             self.become_leader()
 
@@ -253,14 +263,14 @@ class Node(object):
 
             self.current_term += 1  # Increment term
 
-            # Vote for self
-            self.voted_for = self.name
-            self.vote_granted[self.name] = True
-
             self.role = Role.Candidate
 
             # TODO what about the to_send indices, etc.
             self.init_term_state()
+
+            # Vote for self
+            self.voted_for = self.name
+            self.vote_granted[self.name] = True
 
             self.orchestrator.send_to_broker(
                 RequestVote(
@@ -282,7 +292,7 @@ class Node(object):
     # pylint: disable=attribute-defined-outside-init
     def become_leader(self):
         "Transition to a leader state. Assumes votes have been checked by caller."
-        self.orchestrator.log_debug("Won election, becoming leader")
+        self.orchestrator.log_debug("Won election with votes, becoming leader")
 
         # Clear election timeout, if one is set
         self.clear_timeout()
@@ -332,7 +342,12 @@ class Node(object):
         # Clear any pending timeout
         self.clear_timeout()
 
-        interval = randint(TIMEOUT_INF, TIMEOUT_SUP) / 1000
+        # TODO revert; for testing, make node-1 deterministically win the first election
+        if self.name == "node-1":
+            interval = randint(TIMEOUT_INF, TIMEOUT_INF) / 1000
+        else:
+            interval = randint(TIMEOUT_INF + 1, TIMEOUT_SUP) / 1000
+
         self.election_timeout = self.orchestrator.loop.add_timeout(
             time() + interval, self.become_candidate
         )

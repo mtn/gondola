@@ -38,10 +38,10 @@ class Log(object):
         if ind is None:
             if self.entries:
                 return self.entries[-1].term
-            return -1
+            return None
 
         if ind < 0 or ind >= len(self.entries):
-            return -1
+            return None
         return self.entries[ind].term
 
     def update_until(self, index, entry):
