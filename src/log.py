@@ -36,10 +36,12 @@ class Log(object):
         """
 
         if ind is None:
-            return self.entries[-1].term
+            if self.entries:
+                return self.entries[-1].term
+            return -1
 
         if ind < 0 or ind >= len(self.entries):
-            return None
+            return -1
         return self.entries[ind].term
 
     def update_until(self, index, entry):
@@ -70,4 +72,4 @@ class LogEntry(object):
         self.entry = entry
 
     def __repr__(self):
-        return "LedgerEntry({},{})".format(self.term, self.entry)
+        return "LogEntry({},{})".format(self.term, self.entry)

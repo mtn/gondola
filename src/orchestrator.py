@@ -17,7 +17,6 @@ ioloop.install()
 
 
 class Orchestrator(object):
-
     def __init__(self, node, name, debug, pub, router):
         self.node = node
         self.name = name

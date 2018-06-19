@@ -97,6 +97,13 @@ class Node(object):
             if self.connected or msg["type"] == "hello":
                 handle_fn = self.handlers[msg["type"]]
                 handle_fn(msg)
+            else:
+                if "type" in msg and "source" in msg:
+                    self.orchestrator.log(
+                        "Ignoring message of type {} from source {}".format(
+                            msg["type"], msg["source"]
+                        )
+                    )
         else:
             self.orchestrator.log(
                 "Message received with unexpected type {}".format(msg["type"])
@@ -291,13 +298,33 @@ class Node(object):
         # TODO append entries heartbeat
 
     def send_append_entries(self):
-        "Send out append entries and schedule next heartbeat timeout"
+        """
+        Send out append entries and schedule next heartbeat timeout.
+        The leader always sends what it believes to be the entire diff.
+        """
+
+        assert self.role == Role.Leader
 
         for peer in self.peers:
-            if peer == self.leader:
-                continue
+            prev_index = self.next_index[peer]
 
-            # self.orchestrator.send_to_broker(AppendEntries())
+            self.set_rpc_timeout(peer)
+
+            # After the rpc, the node will have the entire log
+            self.next_index[peer] = len(self.log)
+
+            self.orchestrator.send_to_broker(
+                AppendEntries(
+                    self.name,
+                    [peer],
+                    self.current_term,
+                    self.leader,
+                    self.next_index[peer] - 1,
+                    self.log.term(self.next_index[peer] - 1),
+                    self.log.entries[prev_index : self.next_index[peer]],
+                    self.commit_index,
+                )
+            )
 
     def set_election_timeout(self):
         "Set the election timeout. If one was already set, override it."

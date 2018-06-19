@@ -144,7 +144,7 @@ class AppendResponse(RPC):
             {
                 "type": "appendResponse",
                 "source": self.src,
-                "desination": self.dests[0],
+                "destination": self.dests[0],
                 "term": self.term,
                 "success": self.success,
                 "matchIndex": self.match_index,
