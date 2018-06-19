@@ -245,7 +245,10 @@ class Node(object):
         if self.role == Role.Candidate and self.current_term == msg["term"]:
             self.clear_timeout(name=msg["source"])
             self.vote_granted[msg["source"]] = msg["voteGranted"]
+        else:
+            self.orchestrator.log_debug("Ignoring vote, they were stale")
 
+        self.orchestrator.log_debug("Votes : {}".format(self.vote_granted))
         self.orchestrator.log_debug(
             "Votes received: {}".format(sum(self.vote_granted.values()))
         )
@@ -400,7 +403,7 @@ class Node(object):
         "Initialize state that is tracked for a single term"
 
         # Index of the next log entry to send each server
-        self.next_index = {p: 1 for p in self.peers}
+        self.next_index = {p: len(self.log) for p in self.peers}
 
         # Index of the highest log entry known to be replicated
         self.match_index = {p: 0 for p in self.peers}

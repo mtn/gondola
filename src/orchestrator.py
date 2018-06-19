@@ -31,12 +31,19 @@ class Orchestrator(object):
 
     def log(self, msg):
         "Print log messages"
-        print(">>> %10s -- %s" % (self.name, msg))
+        if self.debug:
+            from time import time
+
+            print(">>> {} {} -- {}".format(time(), self.name, msg))
+        else:
+            print(">>> %10s -- %s" % (self.name, msg))
 
     def log_debug(self, msg):
         "Print message if debug mode is enabled (--debug)"
+        from time import time
+
         if self.debug:
-            print(">>> %10s -- %s" % (self.name, msg))
+            print(">>> {} {} -- {}".format(time(), self.name, msg))
 
     def _setup_sockets(self, pub, router):
         "Set up ZMQ sockets"
