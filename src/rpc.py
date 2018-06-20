@@ -1,24 +1,18 @@
 "RPC objects to simplify message passing"
 
+from message import Message
+
 # pylint: disable=too-few-public-methods
 # pylint: disable=too-many-arguments
 # pylint: disable=missing-docstring
 # pylint: disable=bad-continuation
 
 
-class RPC(object):
-    def __init__(self, src, dests):
-        """
-        src :: String
-            The node name of the source
-        dests :: [String]
-            The node names of the destinations
-        """
-        self.src = src
-        self.dests = dests
+class RPC(Message):
+    "Just for grouping RPCs"
 
-    def serialize(self):
-        "Serialize into a list of messages that the broker can transmit"
+    def __init__(self, src, dests):
+        Message.__init__(self, src, dests)
 
 
 class RequestVote(RPC):

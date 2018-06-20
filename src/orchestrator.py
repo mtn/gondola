@@ -65,7 +65,7 @@ class Orchestrator(object):
         self.req.on_recv(self.node.handle_broker_message)
 
     def send_to_broker(self, msg):
-        "Send a message to the broker"
+        "Send a message to the broker. Non-RPC objects aren't examined."
 
         msgs = []
 

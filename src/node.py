@@ -8,7 +8,8 @@ from enum import Enum, auto
 from random import randint
 from math import floor
 
-from rpc import RPC, RequestVote, VoteResponse, AppendEntries, AppendResponse
+from rpc import RequestVote, VoteResponse, AppendEntries, AppendResponse
+from client_response import SetResponse, GetResponse
 from orchestrator import Orchestrator
 from log import Log
 
@@ -257,6 +258,29 @@ class Node(object):
         ):
             self.become_leader()
 
+    def set_request_handler(self, msg):
+        "Handle client set requests"
+
+        # Forward request to leader, if we're not it
+        if not self.name == self.leader:
+            msg["destination"] = self.leader
+            self.orchestrator.send_to_broker(msg)
+            return
+
+        # TODO try retrieve from local storage and report result
+        # self.orchestrator.send_to_broker(SetResponse())
+
+    def get_request_handler(self, msg):
+        "Handle client get requests"
+
+        # Forward request to leader, if we're not it
+        if not self.name == self.leader:
+            msg["destination"] = self.leader
+            self.orchestrator.send_to_broker(msg)
+            return
+
+        # TODO try retrieve from local storage and report result
+
     def become_candidate(self):
         "Start an election by requesting a vote from each node"
         self.orchestrator.log_debug("Starting an election")
@@ -268,7 +292,6 @@ class Node(object):
 
             self.role = Role.Candidate
 
-            # TODO what about the to_send indices, etc.
             self.init_term_state()
 
             # Vote for self
@@ -308,8 +331,6 @@ class Node(object):
 
         self.send_append_entries()
 
-        # TODO append entries heartbeat
-
     def send_append_entries(self):
         """
         Send out append entries and schedule next heartbeat timeout.
@@ -339,6 +360,11 @@ class Node(object):
                 )
             )
 
+    def advance_commit_index(self):
+        "Advance the commit index based on the current majorities"
+
+        pass
+
     def set_election_timeout(self):
         "Set the election timeout. If one was already set, override it."
 
@@ -346,6 +372,7 @@ class Node(object):
         self.clear_timeout()
 
         # TODO revert; for testing, make node-1 deterministically win the first election
+        # alternatively, let nodes supply their own rng and default to randint
         if self.name == "node-1":
             interval = randint(TIMEOUT_INF, TIMEOUT_INF) / 1000
         else:
@@ -400,10 +427,16 @@ class Node(object):
             self.set_election_timeout()
 
     def init_term_state(self):
-        "Initialize state that is tracked for a single term"
+        """
+        Initialize state that is tracked for a single term (including as leader).
+        We can initialize leader state now too because if the node becomes a leader,
+        none of it will have been able to change.
+        """
 
         # Index of the next log entry to send each server
-        self.next_index = {p: len(self.log) for p in self.peers}
+        # This value gets walked back, if a node responds saying they are further behind
+        # However, there will be a mojority this far
+        self.next_index = {p: self.commit_index + 1 for p in self.peers}
 
         # Index of the highest log entry known to be replicated
         self.match_index = {p: 0 for p in self.peers}
@@ -427,6 +460,8 @@ class Node(object):
             "voteResponse": self.vote_response_handler,
             "appendEntries": self.append_entries_handler,
             "appendResponse": self.append_response_handler,
+            "setRequest": self.set_request_handler,
+            "getRequest": self.get_request_handler,
         }
 
     def run(self):
