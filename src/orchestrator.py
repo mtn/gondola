@@ -7,7 +7,7 @@ Design somewhat based on zatt (github.com/simonacca/zatt).
 from zmq.eventloop import ioloop, zmqstream
 import zmq
 
-from rpc import RPC
+from message import Message
 
 # pylint: disable=too-many-instance-attributes
 # pylint: disable=missing-docstring
@@ -69,11 +69,11 @@ class Orchestrator(object):
 
         msgs = []
 
-        if isinstance(msg, RPC):
+        if isinstance(msg, Message):
             msgs = msg.serialize()
         else:
             msgs = [msg]
 
         for to_transmit in msgs:
-            self.log("Sending {}".format(to_transmit))
+            self.log_debug("Sending {}".format(to_transmit))
             self.req.send_json(to_transmit)

@@ -1,4 +1,4 @@
-"Ledger and related types"
+"Log and related types"
 
 # pylint: disable=too-few-public-methods
 # pylint: disable=missing-docstring
@@ -59,7 +59,7 @@ class Log(object):
 
 
 class LogEntry(object):
-    "An entry in a node's ledger"
+    "An entry in a node's log"
 
     def __init__(self, term, entry):
         """

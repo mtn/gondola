@@ -262,10 +262,13 @@ class Node(object):
         "Handle client set requests"
 
         # Forward request to leader, if we're not it
-        if not self.name == self.leader:
+        if self.leader is not None and not self.name == self.leader:
             msg["destination"] = self.leader
             self.orchestrator.send_to_broker(msg)
             return
+
+        if self.leader is None:
+            self.orchestrator.send_to_broker(SetResponse(self.name, None))
 
         # TODO try retrieve from local storage and report result
         # self.orchestrator.send_to_broker(SetResponse())
