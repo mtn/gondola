@@ -75,5 +75,16 @@ class Orchestrator(object):
             msgs = [msg]
 
         for to_transmit in msgs:
-            self.log_debug("Sending {}".format(to_transmit))
+            try:
+                if not (
+                    (
+                        to_transmit["type"] == "appendEntries"
+                        and not to_transmit["entries"]
+                    )
+                    or to_transmit["type"] == "appendResponse"
+                ):
+                    self.log_debug("Sending {}".format(to_transmit))
+            except:
+                print(type(to_transmit))
+                print(to_transmit)
             self.req.send_json(to_transmit)

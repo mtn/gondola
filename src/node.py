@@ -264,25 +264,60 @@ class Node(object):
         # Forward request to leader, if we're not it
         if self.leader is not None and not self.name == self.leader:
             msg["destination"] = self.leader
+            msg["type"] = "setRedirect"
             self.orchestrator.send_to_broker(msg)
             return
 
         if self.leader is None:
-            self.orchestrator.send_to_broker(SetResponse(self.name, None))
+            self.orchestrator.send_to_broker(
+                SetResponse(
+                    self.name,
+                    msg["id"],
+                    error="Could not set {} to {} -- currently not in contact with a leader".format(
+                        msg["key"], msg["value"]
+                    ),
+                )
+            )
+            return
 
-        # TODO try retrieve from local storage and report result
-        # self.orchestrator.send_to_broker(SetResponse())
+        # We must be the leader
+        # self.log.append_entries(SetResponse())
 
     def get_request_handler(self, msg):
         "Handle client get requests"
 
         # Forward request to leader, if we're not it
-        if not self.name == self.leader:
+        if self.leader is not None and not self.name == self.leader:
             msg["destination"] = self.leader
+            msg["type"] = "getRedirect"
             self.orchestrator.send_to_broker(msg)
             return
 
-        # TODO try retrieve from local storage and report result
+        if self.leader is None:
+            self.orchestrator.send_to_broker(
+                GetResponse(
+                    self.name,
+                    msg["id"],
+                    error="Could not get {} -- currently not in contact with a leader".format(
+                        msg["key"]
+                    ),
+                )
+            )
+            return
+
+        # We must be the leader
+        if msg["key"] in self.store:
+            self.orchestrator.send_to_broker(
+                GetResponse(
+                    self.name, msg["id"], key=msg["key"], value=self.store[msg["key"]]
+                )
+            )
+        else:
+            self.orchestrator.send_to_broker(
+                GetResponse(
+                    self.name, msg["id"], error="No such key: {}".format(msg["key"])
+                )
+            )
 
     def become_candidate(self):
         "Start an election by requesting a vote from each node"
@@ -463,8 +498,10 @@ class Node(object):
             "voteResponse": self.vote_response_handler,
             "appendEntries": self.append_entries_handler,
             "appendResponse": self.append_response_handler,
-            "setRequest": self.set_request_handler,
-            "getRequest": self.get_request_handler,
+            "set": self.set_request_handler,
+            "setRedirect": self.set_request_handler,
+            "get": self.get_request_handler,
+            "getRedirect": self.get_request_handler,
         }
 
     def run(self):

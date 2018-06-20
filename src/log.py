@@ -4,30 +4,9 @@
 # pylint: disable=missing-docstring
 
 
-class Request(object):
-    pass
-
-
-class SetRequest(Request):
-    def __init__(self, key, val):
-        self.key = key
-        self.val = val
-
-    def __repr__(self):
-        return "SET {}: {}".format(self.key, self.val)
-
-
-class GetRequest(Request):
-    def __init__(self, key):
-        self.key = key
-
-    def __repr__(self):
-        return "GET {}".format(self.key)
-
-
 class Log(object):
     def __init__(self):
-        self.entries = []  # [LogEntry]
+        self.entries = []  # [ClientResponse]
 
     def term(self, ind=None):
         """
@@ -65,7 +44,7 @@ class LogEntry(object):
         """
         term :: int
             The term the entry was added in
-        entry :: Request
+        entry :: ClientResponse
             A request (set or get)
         """
         self.term = term

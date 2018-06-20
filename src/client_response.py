@@ -18,14 +18,14 @@ class ClientResponse(Message):
 class SetResponse(ClientResponse):
     "Response to client set request"
 
-    def __init__(self, src, req_id, key, value=None, error=None):
+    def __init__(self, src, req_id, key=None, value=None, error=None):
+        assert key is not None and value is not None or error is not None
+
         ClientResponse.__init__(self, src, req_id)
 
         self.key = key
         self.val = value
         self.err = error
-
-        assert value is not None or error is not None
 
     def serialize(self):
         serialized = {"source": self.src, "type": "getResponse", "id": self.req_id}
@@ -36,21 +36,23 @@ class SetResponse(ClientResponse):
         else:
             serialized["error"] = self.err
 
-        return serialized
+        return [serialized]
+
+    def __repr__(self):
+        return "SET({})".format(self.req_id)
 
 
-class GetResponse(Message):
+class GetResponse(ClientResponse):
     "Response to client get request"
 
-    def __init__(self, src, req_id, key, value=None, error=None):
-        Message.__init__(self, None)
+    def __init__(self, src, req_id, key=None, value=None, error=None):
+        assert key is not None and value is not None or error is not None
 
-        self.req_id = req_id
+        ClientResponse.__init__(self, src, req_id)
+
         self.key = key
         self.val = value
         self.err = error
-
-        assert value is not None or error is not None
 
     def serialize(self):
         serialized = {"source": self.src, "type": "getResponse", "id": self.req_id}
@@ -61,4 +63,7 @@ class GetResponse(Message):
             serialized["key"] = self.key
             serialized["value"] = self.val
 
-        return serialized
+        return [serialized]
+
+    def __repr__(self):
+        return "GET({})".format(self.req_id)
